@@ -14,10 +14,16 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from prep_core import carregar_mapa_fasta, process_data, _read_table  # noqa: E402
+from prep_core import (  # noqa: E402
+    carregar_mapa_fasta,
+    descobrir_grupo,
+    process_data,
+    sugerir_grupos_por_prefixo,
+    _read_table,
+)
 
 st.set_page_config(
-    page_title="Preparador de dados — Fase 2",
+    page_title="MicrobiomeAnalyst Data Prep",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -39,14 +45,14 @@ st.markdown(
 for key, value in {
     "result": None,
     "step": 1,
-    "group_mode": "Regras por prefixo",
+    "group_mode": "Rules by prefix",
     "mapping": {},
 }.items():
     st.session_state.setdefault(key, value)
 
-st.title("🧬 MicrobiomeAnalyst Preparation")
+st.title("🧬 MicrobiomeAnalyst Data Prep")
 st.caption(
-    "A tool designed to help you convert your data into a format suitable for microbiome analyst pipeline."
+    "Tool to prepare files to upload to MicrobiomeAnalyst. "
 )
 
 steps = ["1 · Data", "2 · Groups", "3 · Review", "4 · Result"]
@@ -77,7 +83,7 @@ def reset_inputs():
 @st.cache_data(show_spinner=False)
 def _ler_tabela_cache(dados: bytes, nome: str, kind: str) -> pd.DataFrame:
     buffer = io.BytesIO(dados)
-    buffer.name = nome 
+    buffer.name = nome  
     return _read_table(buffer, kind)
 
 
@@ -96,46 +102,44 @@ def read_fasta_preview(uploaded):
 
 
 if st.session_state.step == 1:
-    st.header("1. Upload Data")
+    st.header("1. Data upload")
     st.write(
-        "Upload the files you want to prepare."
-        
+        "Upload the files that you want to process. The app will validate the structure before processing the data."
     )
 
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("Abundance Table")
+        st.subheader("Abundance table")
         abundance = uploader(
-            "Choose the abundance table",
+            "Choose abundance table",
             "CSV, TSV or Excel. Should contain one row per ASV and one column per sample.",
             ["tsv", "csv", "xls", "xlsx", "xlsm"],
         )
-        st.caption("Required · Counts/abundances of ASVs per sample.")
+        st.caption("Obrigatório · contagens/abundâncias das ASVs por amostra.")
 
-        st.subheader("Taxonomy Table")
+        st.subheader("Tabela de taxonomia")
         taxonomy = uploader(
-            "Choose the taxonomy table",
+            "Choose taxonomy table",
             "CSV, TSV or Excel. The first column should identify the ASVs and another column should contain the taxonomy.",
             ["tsv", "csv", "xls", "xlsx", "xlsm"],
         )
-        st.caption("Required · Taxonomic identification/classification of ASVs.")
+        st.caption("Obrigatório · identificação/classificação taxonómica das ASVs.")
 
     with col2:
-        st.subheader("FASTA Sequences")
+        st.subheader("Sequências ASV")
         fasta = uploader(
-            "Choose the FASTA file",
-            "FASTA exported or another FASTA where the identifier of each sequence corresponds to the ASVs.",
+            "Choose FASTA file",
+            "Exported FASTA or another FASTA where each sequence identifier corresponds to the ASVs.",
             ["fasta", "fa", "fna"],
         )
-        st.caption("Required · Sequences used to associate hashes/IDs.")
+        st.caption("Required · sequences used to associate hashes/IDs.")
 
         st.info(
             "💡 **Accepted formats:** CSV, TSV and Excel for tables; FASTA for sequences. "
-            "Don't worry if you're unsure about the structure, the application validates it before processing the data."
+            "The app validates the structure before processing the data."
         )
 
     if abundance and taxonomy and fasta:
-       
         erros = []
 
         df_preview = None
@@ -160,7 +164,7 @@ if st.session_state.step == 1:
         if erros:
             for erro in erros:
                 st.error(erro)
-            st.button("Continuar →", disabled=True, use_container_width=True)
+            st.button("Continuar →", disabled=True, width="stretch")
         else:
             st.success(
                 f"✓ Files selected · {df_preview.shape[0]:,} rows × "
@@ -168,13 +172,13 @@ if st.session_state.step == 1:
             )
             if colisoes_fasta:
                 st.warning(
-                    f" {len(colisoes_fasta)} sequence(s) in the FASTA file repeat a sequence already seen "
+                    f"!!! {len(colisoes_fasta)} sequence(s) in the FASTA file repeat a sequence already seen "
                     "with a different identifier — it will be associated with the first occurrence."
                 )
-            with st.expander("Preview the abundance table"):
-                st.dataframe(df_preview.head(10), use_container_width=True)
+            with st.expander("Pré-visualizar tabela de abundâncias"):
+                st.dataframe(df_preview.head(10), width="stretch")
 
-            if st.button("Continue →", type="primary", use_container_width=True):
+            if st.button("Continuar →", type="primary", width="stretch"):
                 st.session_state.abundance = abundance
                 st.session_state.taxonomy = taxonomy
                 st.session_state.fasta = fasta
@@ -183,10 +187,10 @@ if st.session_state.step == 1:
                 st.session_state.step = 2
                 st.rerun()
     else:
-        st.button("Continue →", disabled=True, use_container_width=True)
+        st.button("Continuar →", disabled=True, width="stretch")
 
 elif st.session_state.step == 2:
-    st.header("2. Define groups")
+    st.header("2. Definir grupos")
     st.write(
         "Choose how you want to associate the samples with the groups. "
         "You can use rules by prefix or assign a group directly to each sample."
@@ -199,14 +203,14 @@ elif st.session_state.step == 2:
         horizontal=True,
         help=(
             "Prefix: a rule applies to all samples whose name starts with the indicated text. "
-            "Direct: each sample receives a group explicitly."
+            "Direct: each sample is explicitly assigned a group."
         ),
     )
     st.session_state.group_mode = mode
 
     sample_names = st.session_state.get("sample_names", [])
     st.info(
-        f"**{len(sample_names)} samples** found. "
+        f"Found **{len(sample_names)} samples**. "
         "The names below come directly from the loaded table."
     )
 
@@ -217,6 +221,20 @@ elif st.session_state.step == 2:
             "There are no predefined groups. If there are overlapping prefixes, "
             "the most specific rule is applied first."
         )
+
+        col_sugestao, _ = st.columns([1, 2])
+        with col_sugestao:
+            if st.button("💡 Suggest based on sample names", width="stretch"):
+                sugestao = sugerir_grupos_por_prefixo(sample_names)
+                if sugestao:
+                    st.session_state.mapping = sugestao
+                    st.session_state.pop("mapping_editor", None)
+                    st.rerun()
+                else:
+                    st.info(
+                        "No overlapping prefixes found among the samples "
+                        "(each name appears unique). Define the groups manually."
+                    )
 
         current = st.session_state.mapping
         mapping_df = pd.DataFrame(
@@ -229,12 +247,12 @@ elif st.session_state.step == 2:
         edited = st.data_editor(
             mapping_df,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Prefix": st.column_config.TextColumn(
                     "Sample prefix", required=False,
-                    help="Initial text of the sample name."
+                    help="Initial part of the sample name."
                 ),
                 "Group": st.column_config.TextColumn(
                     "Group name", required=False,
@@ -261,16 +279,35 @@ elif st.session_state.step == 2:
 
                 preview = pd.DataFrame({
                     "Sample": sample_names,
-                    "Detected group": [preview_group(n) for n in sample_names],
+                    "Detected Group": [preview_group(n) for n in sample_names],
                 })
-                with st.expander("Ver como as regras serão aplicadas"):
-                    st.dataframe(preview, use_container_width=True, hide_index=True)
-                    missing = int((preview["Detected group"] == "No group").sum())
+                with st.expander("View how the rules will be applied"):
+                    st.dataframe(preview, width="stretch", hide_index=True)
+                    missing = int((preview["Detected Group"] == "No group").sum())
                     if missing:
-                        st.warning(f"{missing} sample(s) still do not match any rule.")
+                        st.warning(f"{missing} sample(s) do not correspond to any rule.")
 
     else:
-        st.markdown("### Sample assignment")
+        st.markdown("### Atribuição das amostras")
+
+        col_sugestao, _ = st.columns([1, 2])
+        with col_sugestao:
+            if st.button("Suggestion through prefix analysis", width="stretch"):
+                prefixos_sugeridos = sugerir_grupos_por_prefixo(sample_names)
+                if prefixos_sugeridos:
+                    st.session_state.mapping = {
+                        nome: grupo
+                        for nome in sample_names
+                        if (grupo := descobrir_grupo(nome, prefixos_sugeridos)) != "Unknown"
+                    }
+                    st.session_state.pop("direct_mapping_editor", None)
+                    st.rerun()
+                else:
+                    st.info(
+                        "No repeated prefixes found among the samples "
+                        "(each name appears to be unique). Assign groups manually."
+                    )
+
         direct_df = pd.DataFrame({
             "Sample": sample_names,
             "Group": [
@@ -279,11 +316,11 @@ elif st.session_state.step == 2:
         })
         edited = st.data_editor(
             direct_df,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             disabled=["Sample"],
             column_config={
-                "Sample": st.column_config.TextColumn("Sample", disabled=True),
+                "Sample": st.column_config.TextColumn("Sample"),
                 "Group": st.column_config.TextColumn(
                     "Group", help="Enter the group corresponding to each sample."
                 ),
@@ -294,22 +331,22 @@ elif st.session_state.step == 2:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("← Return", use_container_width=True):
+        if st.button("← Return", width="stretch"):
             st.session_state.step = 1
             st.rerun()
     with c2:
-        if st.button("Continue →", type="primary", use_container_width=True):
+        if st.button("Continue →", type="primary", width="stretch"):
             clean = {}
             if mode == "Regras por prefixo":
                 for _, row in edited.iterrows():
-                    prefix = str(row.get("Prefix", "")).strip()
-                    group = str(row.get("Group", "")).strip()
+                    prefix = str(row.get("Prefixo", "")).strip()
+                    group = str(row.get("Grupo", "")).strip()
                     if prefix and group and prefix.lower() != "nan" and group.lower() != "nan":
                         clean[prefix] = group
             else:
                 for _, row in edited.iterrows():
                     sample = str(row.get("Sample", "")).strip()
-                    group = str(row.get("Group", "")).strip()
+                    group = str(row.get("Grupo", "")).strip()
                     if sample and group and group.lower() != "nan":
                         clean[sample] = group
 
@@ -319,9 +356,9 @@ elif st.session_state.step == 2:
 
 elif st.session_state.step == 3:
     st.header("3. Review and process")
-    st.write("Confirm the data and rules before initiating the processing.")
+    st.write("Confirm the data and rules before starting the processing.")
 
-    st.subheader("Files")
+    st.subheader("Files selected")
     for label, key in [
         ("Abundance Table", "abundance"),
         ("Taxonomy Table", "taxonomy"),
@@ -336,12 +373,12 @@ elif st.session_state.step == 3:
                 {"Rule / Sample": k, "Group": v}
                 for k, v in st.session_state.mapping.items()
             ]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:
         st.warning(
-            "No group rules were defined. The samples will be processed "
+            "No group rules defined. Samples will be processed "
             "and appear as `Unknown` in the metadata."
         )
 
@@ -352,11 +389,11 @@ elif st.session_state.step == 3:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("← Change groups", use_container_width=True):
+        if st.button("← Change Groups", width="stretch"):
             st.session_state.step = 2
             st.rerun()
     with c2:
-        if st.button("▶ Execute processing", type="primary", use_container_width=True):
+        if st.button("▶ Execute Processing", type="primary", width="stretch"):
             with st.spinner("Preparing the data…"):
                 try:
                     with tempfile.TemporaryDirectory() as tmp:
@@ -387,8 +424,8 @@ elif st.session_state.step == 4:
     st.header("4. Results")
 
     if result is None:
-        st.warning("No results available.")
-        if st.button("Return to the beginning", use_container_width=True):
+        st.warning("There's no result available.")
+        if st.button("Back to Start", width="stretch"):
             reset_inputs()
             st.rerun()
         st.stop()
@@ -401,22 +438,22 @@ elif st.session_state.step == 4:
         with st.expander("View samples without a group"):
             st.write(", ".join(result["unknown_samples"]))
     else:
-        st.success("✓ All samples have been associated with a group.")
+        st.success("✓ All samples were associated with a group.")
 
     if result["fasta_sem_correspondencia"]:
         with st.expander(
-            f"ℹ️ {len(result['fasta_sem_correspondencia'])} ASV(s) maintained the original ID "
-            "(without correspondence in the FASTA)"
+            f"ℹ {len(result['fasta_sem_correspondencia'])} ASV(s) kept the original ID "
+            "(No correspondence in FASTA)"
         ):
             st.caption(
-                "This is usually due to a mismatch between the ASV identifiers in the abundance table and the FASTA"
-                "sequences. The first 100 ASVs are shown below."
+                "This is normal if the table already comes with readable IDs instead of sequence hashes. "
+                "If you didn't expect this, please confirm that you uploaded the correct FASTA file."
             )
             st.write(", ".join(result["fasta_sem_correspondencia"][:100]))
 
     if result["fasta_sequencias_duplicadas"]:
         st.warning(
-            f"⚠️ {len(result['fasta_sequencias_duplicadas'])} sequence(s) in the FASTA were "
+            f"⚠️ {len(result['fasta_sequencias_duplicadas'])} Fasta sequence(s) were"
             "identical to a sequence already processed and were ignored."
         )
 
@@ -435,7 +472,7 @@ elif st.session_state.step == 4:
             "Metadata and groups",
         ],
     })
-    st.dataframe(files_df, use_container_width=True, hide_index=True)
+    st.dataframe(files_df, width="stretch", hide_index=True)
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -446,21 +483,21 @@ elif st.session_state.step == 4:
     st.download_button(
         "⬇️ Download all results (ZIP)",
         data=zip_buffer.getvalue(),
-        file_name="results.zip",
+        file_name="resultados_fase2.zip",
         mime="application/zip",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     )
 
-    st.subheader("Preview of the results")
+    st.subheader("Preview")
     tab1, tab2, tab3 = st.tabs(["Metadata", "Taxonomy", "Abundances"])
     with tab1:
-        st.dataframe(result["metadata"].head(50), use_container_width=True)
+        st.dataframe(result["metadata"].head(50), width="stretch")
     with tab2:
-        st.dataframe(result["taxonomy"].head(50), use_container_width=True)
+        st.dataframe(result["taxonomy"].head(50), width="stretch")
     with tab3:
-        st.dataframe(result["otu_table"].iloc[:50, :50], use_container_width=True)
+        st.dataframe(result["otu_table"].iloc[:50, :50], width="stretch")
 
-    if st.button("↻ Preparar novos dados", use_container_width=True):
+    if st.button("↻ Prepare New Data", width="stretch"):
         reset_inputs()
         st.rerun()

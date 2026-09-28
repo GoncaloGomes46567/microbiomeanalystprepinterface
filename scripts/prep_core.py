@@ -1,30 +1,27 @@
-"""Core processing logic for the Bioinformatics Phase 2 application.
-
-This module is deliberately independent from Streamlit so it can be used by
-both the graphical interface and the command-line script.
-"""
-
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
-from typing import Dict, List, Mapping, Tuple, Union
+from typing import Dict, Iterable, List, Mapping, Tuple, Union
 
 import pandas as pd
 
 PathLike = Union[str, Path]
 
-# Ordem e prefixos QIIME2/greengenes usados para separar a string de taxonomia.
 NIVEIS_TAXONOMICOS = ["Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"]
-PREFIXOS_TAXONOMICOS = ["k__", "p__", "c__", "o__", "f__", "g__", "s__"]
+PREFIXO_PARA_NIVEL = {
+    "k__": "Kingdom", "d__": "Kingdom", "p__": "Phylum", "c__": "Class",
+    "o__": "Order", "f__": "Family", "g__": "Genus", "s__": "Species",
+}
 
 
 def _open_text(path_or_file):
-    """Devolve um stream de texto, tanto para um caminho como para um upload já aberto.
+    """Return a text stream, either for a path or an already opened upload.
 
-    Não fechamos objetos UploadedFile aqui porque o Streamlit pode precisar
-    de os reutilizar dentro da mesma interação.
+    We don't close UploadedFile objects here because Streamlit might need
+    to reuse them within the same interaction.
     """
     if hasattr(path_or_file, "read"):
         return path_or_file, False
@@ -32,11 +29,10 @@ def _open_text(path_or_file):
 
 
 def carregar_mapa_fasta(caminho_fasta) -> Tuple[Dict[str, str], List[str]]:
-    """Constrói o mapa md5(sequência) -> ID da ASV a partir de um FASTA.
+    """Build a mapping from md5(sequence) -> ASV ID based on a FASTA file.
 
-    Devolve também a lista de IDs cuja sequência colide com a de um ID
-    anterior (mesma sequência, cabeçalho diferente), para o utilizador poder
-    ser avisado em vez de a colisão passar despercebida.
+    Also returns a list of IDs whose sequence collides with that of a previous ID
+    (same sequence, different header), so the user can be warned instead of the collision going unnoticed.
     """
     mapa: Dict[str, str] = {}
     colisoes: List[str] = []
@@ -70,31 +66,30 @@ def carregar_mapa_fasta(caminho_fasta) -> Tuple[Dict[str, str], List[str]]:
             f.close()
 
     if not mapa:
-        raise ValueError("O ficheiro FASTA não contém sequências válidas.")
+        raise ValueError("The FASTA file does not contain valid sequences.")
     return mapa, colisoes
 
 
 def limpar_taxonomia(texto_tax):
-    """Separa uma string tipo 'k__Bacteria;p__Firmicutes;...' pelos seus níveis."""
+    """Separate a string of the type 'k__Bacteria;p__Firmicutes;...' by its levels."""
     resultado = {nivel: "" for nivel in NIVEIS_TAXONOMICOS}
     if pd.isna(texto_tax):
         return resultado
     for parte in str(texto_tax).split(";"):
         parte = parte.strip()
-        for prefixo, nivel in zip(PREFIXOS_TAXONOMICOS, NIVEIS_TAXONOMICOS):
+        for prefixo, nivel in PREFIXO_PARA_NIVEL.items():
             if parte.startswith(prefixo):
                 resultado[nivel] = parte[len(prefixo):].strip()
     return resultado
 
 
 def formatar_taxonomia(df_tax: pd.DataFrame) -> pd.DataFrame:
-    """Devolve uma tabela Kingdom..Species a partir de dois formatos possíveis:
+    """Return a table Kingdom..Species based on two possible formats:
 
     - uma única coluna com strings 'k__x;p__y;...' (export QIIME2/greengenes); ou
     - colunas já separadas com os nomes dos níveis (ex.: export do MicrobiomeAnalyst).
 
-    Se nenhuma coluna corresponder a um nível conhecido, assume-se o primeiro
-    formato e usa-se a primeira coluna da tabela.
+   if neither format is detected, the function will return a DataFrame with empty strings for all levels.
     """
     colunas_por_nome = {str(c).strip().lower(): c for c in df_tax.columns}
     tem_colunas_separadas = any(nivel.lower() in colunas_por_nome for nivel in NIVEIS_TAXONOMICOS)
@@ -110,22 +105,56 @@ def formatar_taxonomia(df_tax: pd.DataFrame) -> pd.DataFrame:
 
 
 def descobrir_grupo(nome_amostra: str, dicionario_grupos: Mapping[str, str]) -> str:
-    """Determina o grupo pelo prefixo mais longo que corresponde (ex.: V.CN antes de V)."""
+    """Determine the group of a sample based on its name and a mapping of prefixes to groups."""
     for prefixo in sorted(dicionario_grupos.keys(), key=len, reverse=True):
         if nome_amostra.startswith(prefixo):
             return dicionario_grupos[prefixo]
     return "Unknown"
 
 
+def sugerir_grupos_por_prefixo(nomes_amostra: Iterable[str]) -> Dict[str, str]:
+    """Propose rules → group only based on the names of the loaded samples.
+
+    There is no predefined group (neither "Frutalose", nor "Inoculum", nor
+    anything specific to a particular study): the idea is to look at the part
+    of each name that normally identifies the replica (a number, or a
+    number followed by a dot/hyphen/underscore at the end) and remove that
+    parte. O que sobra é usado como prefixo do grupo.
+
+    Examples:
+        "A.CN.1", "A.CN.2"      -> prefixo "A.CN" (2 amostras, sugerido)
+        "V1", "V2", "V3"        -> prefixo "V" (3 amostras, sugerido)
+        "amostra_unica"         -> não é sugerido (não repete com mais nenhuma)
+
+    Only suggest a prefix when at least two samples share it —
+    otherwise there are no replicas to group and the suggestion would
+    not be helpful. The name of the suggested group is the prefix itself; the
+    user can always edit it in the table before continuing.
+    """
+    from collections import Counter
+
+    prefixo_por_amostra = {}
+    for nome in nomes_amostra:
+        nome = str(nome)
+        nucleo = re.sub(r"[\s._-]*\d+$", "", nome).strip()
+        prefixo_por_amostra[nome] = nucleo or nome
+
+    contagem = Counter(prefixo_por_amostra.values())
+    prefixos_com_replicas = [p for p, n in contagem.items() if n >= 2 and p]
+
+ 
+    return {prefixo: prefixo for prefixo in sorted(prefixos_com_replicas, key=len, reverse=True)}
+
+
 def _detetar_separador(primeira_linha: str) -> str:
-    """Tenta perceber se a linha usa vírgulas ou tabs, contando ocorrências."""
+    """Try to detect the separator used in the first line."""
     if primeira_linha.count(",") > primeira_linha.count("\t"):
         return ","
     return "\t"
 
 
 def _ler_primeiras_linhas(file_or_path, n: int = 2) -> List[str]:
-    """Lê as primeiras `n` linhas de um ficheiro ou upload, sem consumir o stream."""
+    """Read `n` lines from a file or upload, without consuming the stream."""
     if hasattr(file_or_path, "read"):
         file_or_path.seek(0)
         conteudo = file_or_path.read()
@@ -140,10 +169,10 @@ def _ler_primeiras_linhas(file_or_path, n: int = 2) -> List[str]:
 
 
 def _read_table(file_or_path, kind: str) -> pd.DataFrame:
-    """Lê CSV/TSV/XLS/XLSX, detetando o separador pelo conteúdo em vez de assumir pela extensão.
+    """Read CSV/TSV/XLS/XLSX, detecting the separator by its content instead of assuming it by the extension.
 
-    Também reconhece o cabeçalho de comentário que o QIIME2 coloca antes da
-    linha de colunas nas tabelas de abundância exportadas.
+    Also recognizes the comment header that QIIME2 places before the
+    column header line in exported abundance tables.
     """
     nome = getattr(file_or_path, "name", str(file_or_path)).lower()
     sufixo = Path(nome).suffix.lower()
@@ -156,9 +185,7 @@ def _read_table(file_or_path, kind: str) -> pd.DataFrame:
 
     separador = "," if sufixo == ".csv" else _detetar_separador(primeira_linha)
 
-    # Ficheiros exportados do QIIME2 têm uma linha "# Constructed from biom
-    # file" antes do cabeçalho real. Só ignoramos essa linha se não parecer
-    # já ser o próprio cabeçalho (que também começa por '#').
+   
     ignora_primeira = (
         kind == "abundance"
         and primeira_linha.startswith("#")
@@ -177,28 +204,28 @@ def _read_table(file_or_path, kind: str) -> pd.DataFrame:
 
 
 def validate_inputs(df_otu: pd.DataFrame, df_tax: pd.DataFrame, fasta_map: Mapping[str, str]):
-    """Valida os requisitos estruturais mínimos antes de processar os dados."""
+    """Validate the input dataframes."""
     errors = []
     if df_otu.empty:
-        errors.append("A tabela de abundâncias está vazia.")
+        errors.append("Abundance table is empty.")
     if df_tax.empty:
-        errors.append("A tabela de taxonomia está vazia.")
+        errors.append("Taxonomy table is empty.")
     if df_otu.index.duplicated().any():
-        errors.append("A tabela de abundâncias contém IDs de ASV duplicados.")
+        errors.append("Abundance table contains duplicate ASV IDs.")
     if df_tax.index.duplicated().any():
-        errors.append("A tabela de taxonomia contém IDs de ASV duplicados.")
+        errors.append("Taxonomy table contains duplicate ASV IDs.")
     if df_otu.shape[1] == 0:
-        errors.append("Não foram encontradas amostras na tabela de abundâncias.")
+        errors.append("No samples found in the abundance table.")
 
     try:
         numeric = df_otu.apply(pd.to_numeric)
         if numeric.isna().any().any():
-            errors.append("A tabela de abundâncias contém valores que não são numéricos.")
+            errors.append("The abundance table contains non-numeric values.")
     except Exception:
-        errors.append("Não foi possível interpretar a tabela de abundâncias como valores numéricos.")
+        errors.append("Could not interpret the abundance table as numeric values.")
 
     if not fasta_map:
-        errors.append("Não foram encontradas sequências no FASTA.")
+        errors.append("No sequences found in the FASTA file.")
     return errors
 
 
@@ -209,7 +236,7 @@ def process_data(
     mapeamento: Mapping[str, str],
     pasta_saida: PathLike,
 ) -> dict:
-    """Corre o pipeline completo da Fase 2 e devolve um resumo do resultado."""
+    """Run the complete pipeline for Phase 2 and return a summary of the results."""
     output_dir = Path(pasta_saida)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -226,9 +253,6 @@ def process_data(
     if errors:
         raise ValueError("\n".join(errors))
 
-    # Quantas ASVs da tabela não tinham correspondência no FASTA? Se o índice
-    # já vier com os IDs em vez de hashes de sequência, é normal que seja
-    # tudo — mas vale a pena reportar para o utilizador perceber o que aconteceu.
     ids_sem_correspondencia = [str(idx) for idx in df_otu.index if str(idx) not in mapa_ids]
 
     df_otu = df_otu.apply(pd.to_numeric)
@@ -241,18 +265,18 @@ def process_data(
     col_sums = df_otu.sum(axis=0)
     if (col_sums <= 0).any():
         bad = ", ".join(map(str, col_sums[col_sums <= 0].index))
-        raise ValueError(f"Existem amostras sem contagens (soma igual a zero): {bad}")
+        raise ValueError(f"Groups with zero counts: {bad}")
 
     otu_tss = df_otu.div(col_sums, axis=1)
     desvio_max = float((otu_tss.sum(axis=0) - 1.0).abs().max())
     if desvio_max >= 1e-9:
-        raise ValueError(f"Validação TSS falhou (desvio máximo: {desvio_max:.2e}).")
+        raise ValueError(f"TSS validation failed (maximum deviation: {desvio_max:.2e}).")
     otu_tss.index.name = "#NAME"
     tss_path = output_dir / "otu_table_tss.txt"
     otu_tss.to_csv(tss_path, sep="\t", float_format="%.15g")
 
     if df_tax.shape[1] == 0:
-        raise ValueError("A tabela de taxonomia não contém nenhuma coluna de taxonomia.")
+        raise ValueError("The taxonomy table does not contain any taxonomy columns.")
     df_tax.index = [mapa_ids.get(str(idx), str(idx)) for idx in df_tax.index]
     tax_limpa = formatar_taxonomia(df_tax)
     tax_limpa = tax_limpa.reindex(df_otu.index).fillna("")
