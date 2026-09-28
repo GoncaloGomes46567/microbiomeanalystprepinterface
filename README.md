@@ -1,4 +1,4 @@
-# Projeto Bioinformática — Fase 2
+# MicrobiomeAnalyst Prep
 
 ## Interface gráfica
 
