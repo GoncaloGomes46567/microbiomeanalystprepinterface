@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-# Bioinformatics Project — Phase 2
-=======
 # MicrobiomeAnalyst Prep
->>>>>>> 05cfbd4c0a8eeac2d1f38962c15ce5304e368876
+
 
 ## Graphical interface
 
