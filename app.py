@@ -24,7 +24,7 @@ from prep_core import (  # noqa: E402
 )
 
 st.set_page_config(
-    page_title="Data Preparer — Phase 2",
+    page_title="MicrobiomeAnalyst Prep",
     page_icon="🧬",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -52,7 +52,7 @@ for key, value in {
 }.items():
     st.session_state.setdefault(key, value)
 
-st.title("🧬 Data Preparer — Phase 2")
+st.title("🧬 MicrobiomeAnalyst Prep")
 st.caption(
     "General-purpose tool to prepare abundance, taxonomy and sequence tables "
     "for the analysis workflow. No assumptions about sample names, organisms or groups."
