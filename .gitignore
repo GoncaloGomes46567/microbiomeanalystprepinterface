@@ -1,9 +1,0 @@
-# Ignorar dados pesados e outputs locais
-data/*
-!data/README.md
-output/
-
-# Ignorar ficheiros do Python/Jupyter
-__pycache__/
-*.pyc
-.ipynb_checkpoints/

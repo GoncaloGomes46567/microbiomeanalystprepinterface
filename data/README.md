@@ -1,12 +1,7 @@
-Coloca nesta pasta os ficheiros exportados através do QIIME2:
+Place the files exported from QIIME2 in this folder:
 
-\- `feature-table.tsv`
+- `feature-table.tsv`
+- `feature.fasta`
+- `taxonomy.tsv`
 
-\- `feature.fasta`
-
-\- `taxonomy.tsv`
-
-
-
-Nota: Esta pasta está configurada no `.gitignore` para que os dados brutos não sejam publicados no GitHub.
-
+Note: this folder is set in `.gitignore` so raw data isn't published on GitHub.

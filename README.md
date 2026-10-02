@@ -1,57 +1,67 @@
-# Projeto Bioinformática — Fase 2
+# Bioinformatics Project — Phase 2
 
-## Interface gráfica
+## Graphical interface
 
-A aplicação disponibiliza um preparador genérico de dados para a Fase 2. Não existem
-grupos, organismos ou nomes de amostras definidos no código da interface.
+This app is a general-purpose data preparation tool for Phase 2. Nothing about your
+study is hard-coded: there are no built-in groups, organisms or sample names. Everything
+is worked out from the files you upload.
 
-O utilizador carrega:
-- uma tabela de abundâncias (`.csv`, `.tsv`, `.xls`, `.xlsx` ou `.xlsm`);
-- uma tabela de taxonomia nos mesmos formatos;
-- um ficheiro FASTA.
+You provide three files:
+- an abundance table (`.csv`, `.tsv`, `.xls`, `.xlsx` or `.xlsm`);
+- a taxonomy table in any of the same formats;
+- a FASTA file.
 
-Depois pode associar as amostras a grupos de duas formas:
-1. **Regras por prefixo** — uma regra é aplicada aos nomes que começam pelo prefixo indicado;
-2. **Atribuição direta por amostra** — cada amostra pode receber um grupo individualmente.
+Once your data is loaded, you can assign samples to groups in one of two ways:
+1. **Prefix rules** — a rule applies to every sample whose name starts with the prefix you give it;
+2. **Direct assignment** — you pick a group for each sample individually.
 
-Em ambos os modos existe um botão **"Sugerir a partir dos nomes das amostras"**
-que propõe grupos automaticamente, olhando só para os nomes de amostra que
-vêm do ficheiro carregado (não há nenhum grupo pré-definido no código). A
-sugestão é sempre editável antes de avançar.
+Both modes include a **"Suggest from sample names"** button. It proposes groups
+automatically, looking only at the sample names in your uploaded file — there are
+no predefined groups in the code. The suggestion is always editable before you move on.
 
-O resultado é composto por:
+You can also choose the normalization method:
+- **Relative (TSS)** — the default. Divides each ASV by the sample's total sum.
+- **16S gene copy number** — divides each ASV by its most specific taxon's factor,
+  using a reference table you upload (e.g. `Taxon` and `CopyNumber` columns).
+  Nothing is hard-coded in the app; everything comes from the table you provide.
+
+The app produces four files:
 - `otu_table.txt`
-- `otu_table_tss.txt`
+- `otu_table_tss.txt` or `otu_table_copynumber.txt` (depending on the chosen method)
 - `taxonomy.txt`
 - `metadata.txt`
 
-e pode ser descarregado num único ZIP.
+You can download all of them together as a single ZIP.
 
-## Instalação
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Executar a interface
+## Running the app
 
 ```bash
 streamlit run app.py
 ```
 
-A aplicação será aberta no navegador.
+The app will open in your browser.
 
-## Execução por linha de comandos
+## Command-line usage
 
-A funcionalidade original continua disponível através de:
+The original command-line workflow still works:
 
 ```bash
 python scripts/prep.py \
-  --input data/feature-table.tsv \
+  --input-table data/feature-table.tsv \
   --fasta data/feature.fasta \
   --taxonomy data/taxonomy.tsv \
-  --output outputs
+  --mapping config/mapping.json \
+  --output-folder outputs
 ```
 
-O `config/mapping.json` pode continuar a ser usado para o modo de linha de comandos.
-A interface gráfica não depende desse ficheiro.
+Add `--normalization copy_number --copy-numbers data/copy_numbers.csv` to use
+copy-number normalization instead of TSS.
+
+You can keep using `config/mapping.json` to define groups in command-line mode.
+The graphical interface doesn't need it.
